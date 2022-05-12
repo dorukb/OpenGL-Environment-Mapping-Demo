@@ -60,6 +60,9 @@ bool firstTimeReceivingMouseInput = true;
 float mouseYaw = -90.0f;
 float mousePitch = 0.0f;
 
+float centralObjectRotDeg = 0.0f;
+float orbitObjectRotDef = 0.0;
+
 struct Vertex
 {
     Vertex(GLfloat inX, GLfloat inY, GLfloat inZ) : x(inX), y(inY), z(inZ) { }
@@ -477,7 +480,7 @@ void initVBO(GLuint& vao, GLuint& vertexAttribBuffer, GLuint& indexBuffer,
 void init() 
 {
 	ParseObj("teapot.obj",gTextures, gNormals, gVertices, gFaces);
-    ParseObj("cube.obj", orbitTextures, orbitNormals, orbitVertices, orbitFaces);
+    ParseObj("armadillo.obj", orbitTextures, orbitNormals, orbitVertices, orbitFaces);
 
     glEnable(GL_DEPTH_TEST);
     initShaders();
@@ -526,7 +529,7 @@ void createStaticCubeMap()
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
 }
-void drawModel(GLuint vao, GLuint vertexAttribBufferId, GLuint indexBufferId, int vertexDataSizeBytes)
+void drawModel(GLuint vao, GLuint vertexAttribBufferId, GLuint indexBufferId, int vertexDataSizeBytes, size_t faceCount)
 {
     glBindVertexArray(vao);
 	glBindBuffer(GL_ARRAY_BUFFER, vertexAttribBufferId);
@@ -535,7 +538,7 @@ void drawModel(GLuint vao, GLuint vertexAttribBufferId, GLuint indexBufferId, in
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(vertexDataSizeBytes));
 
-	glDrawElements(GL_TRIANGLES, gFaces.size() * 3, GL_UNSIGNED_INT, 0);
+	glDrawElements(GL_TRIANGLES, faceCount * 3, GL_UNSIGNED_INT, 0);
 }
 
 void display()
@@ -551,12 +554,6 @@ void display()
     lastFrame = currentFrame;
 
     viewingMatrix = glm::lookAt(cameraPos, cameraPos + cameraGaze, cameraUp);
-  /*  const float radius = 10.0f;
-    float camX = sin(glfwGetTime()) * radius;
-    float camZ = cos(glfwGetTime()) * radius;*/
-    //viewingMatrix = glm::lookAt(glm::vec3(camX, 0.0, camZ), glm::vec3(0.0f, 0.0f, 0.0f), up);
-
-	// Compute the modeling matrix
 
     //glm::quat q0(0, 1, 0, 0); // along x
     //glm::quat q1(0, 0, 1, 0); // along y
@@ -568,21 +565,10 @@ void display()
     ////modelingMatrix = matT * glm::toMat4(pitchQuat) * glm::toMat4(rollQuat) * modelingMatrix;
     //modelingMatrix = matT * glm::toMat4(rollQuat) * glm::toMat4(pitchQuat) * modelingMatrix; // roll is based on pitch
 
-	// Set the active program and the values of its uniform variables
-
-	/*glUseProgram(gProgram[activeProgramIndex]);
-	glUniformMatrix4fv(projectionMatrixLoc[activeProgramIndex], 1, GL_FALSE, glm::value_ptr(projectionMatrix));
-	glUniformMatrix4fv(viewingMatrixLoc[activeProgramIndex], 1, GL_FALSE, glm::value_ptr(viewingMatrix));
-	glUniformMatrix4fv(modelingMatrixLoc[activeProgramIndex], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
-	glUniform3fv(eyePosLoc[activeProgramIndex], 1, glm::value_ptr(eyePos));*/
-
-    // draw scene as normal
-
-    activeProgramIndex = 1;
-
-    setShaderParams(activeProgramIndex);
 
     // draw skybox first
+    activeProgramIndex = 1;
+    setShaderParams(activeProgramIndex);
     drawSkybox();
 
 
@@ -590,27 +576,43 @@ void display()
 
     // Draw Teapot/center obj
 
-    glm::vec3 teapotPosition(0.0f, -5.5f, -10.0f);
+    glm::vec3 teapotPosition(0.0f, -8.f, -20.0f);
     glm::mat4 teapotTranslation = glm::translate(glm::mat4(1.0), teapotPosition);
 
-    static float rotDeg = 0.0f;
-    float rotRad = (float)(rotDeg / 180.f) * M_PI;
+    float rotRad = (float)(centralObjectRotDeg / 180.f) * M_PI;
+    float orbitRotRad = (float)(orbitObjectRotDef / 180.f) * M_PI;
+
     glm::quat rotQuat(cos(rotRad / 2), 0, 1 * sin(rotRad / 2), 0);
     modelingMatrix = teapotTranslation * glm::toMat4(rotQuat) * glm::mat4(1.0);
 
     activeProgramIndex = 0;
     setShaderParams(activeProgramIndex);
-    drawModel(teapotVAO, gVertexAttribBuffer, gIndexBuffer, gVertexDataSizeInBytes);
+    drawModel(teapotVAO, gVertexAttribBuffer, gIndexBuffer, gVertexDataSizeInBytes, gFaces.size());
 
     // draw orbiting objects
     glm::vec3 orbitObjectPosition = teapotPosition;
-    orbitObjectPosition.x -= 5.0f;
+    //orbitObjectPosition.x -= 5.0f;
+    orbitObjectPosition.y -= 7.5f;
     glm::mat4 orbitObjectTranslation = glm::translate(glm::mat4(1.0), orbitObjectPosition);
-    modelingMatrix = orbitObjectTranslation * glm::mat4(1.0);
-    glUniformMatrix4fv(modelingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
-    drawModel(orbitVAO, orbitVertexAttribBuffer, orbitIndexBuffer, orbitVertexDataSizeInBytes);
 
-    rotDeg += 25.0f * deltaTime;
+    auto t1 = glm::translate(glm::mat4(1.0), teapotPosition);
+    auto rot1 = glm::rotate(t1, orbitRotRad, glm::vec3(1,0,0));
+    auto t2 = glm::translate(rot1, -teapotPosition);
+
+    //float sinrot = sin(rotRad / 2);
+    //glm::quat orbitRot(cos(rotRad / 2), teapotPosition.x * sinrot, teapotPosition.y * sinrot, teapotPosition.z * sinrot);
+    /*glm::vec3 rotAxis = glm::normalize(teapotPosition);
+    glm::quat orbitRot(cos(rotRad / 2), rotAxis * sinrot);    */
+    
+    modelingMatrix = t2 * orbitObjectTranslation;
+
+    //modelingMatrix = orbitObjectTranslation * glm::toMat4(orbitRot) * glm::mat4(1.0);
+    glUniformMatrix4fv(modelingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
+
+    drawModel(orbitVAO, orbitVertexAttribBuffer, orbitIndexBuffer, orbitVertexDataSizeInBytes, orbitFaces.size());
+
+    centralObjectRotDeg += 25.0f * deltaTime;
+    orbitObjectRotDef += 50.0f * deltaTime;
 }
 void drawSkybox() 
 {
