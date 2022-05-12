@@ -99,11 +99,22 @@ vector<Texture> gTextures;
 vector<Normal> gNormals;
 vector<Face> gFaces;
 
+vector<Vertex> orbitVertices;
+vector<Texture> orbitTextures;
+vector<Normal> orbitNormals;
+vector<Face> orbitFaces;
+
+
 // for drawing the Teapot
 GLuint gVertexAttribBuffer, gIndexBuffer;
-GLint gInVertexLoc, gInNormalLoc;
 int gVertexDataSizeInBytes, gNormalDataSizeInBytes;
-GLuint teapotVBO, teapotVAO;
+GLuint teapotVAO;
+
+// for drawing the orbitObject(s)
+GLuint orbitVertexAttribBuffer, orbitIndexBuffer;
+int orbitVertexDataSizeInBytes, orbitNormalDataSizeInBytes;
+GLuint orbitVAO;
+
 
 // for drawing the static cubemapped skybox
 GLuint skyboxVAO;
@@ -152,7 +163,7 @@ float skyboxVertices[] = {
      1.0f, -1.0f,  1.0f
 };
 
-bool ParseObj(const string& fileName)
+bool ParseObj(const string& fileName, vector<Texture>& textures, vector<Normal>& normals, vector<Vertex>& vertices, vector<Face>& faces)
 {
     fstream myfile;
 
@@ -178,19 +189,19 @@ bool ParseObj(const string& fileName)
                     {
                         str >> tmp; // consume "vt"
                         str >> c1 >> c2;
-                        gTextures.push_back(Texture(c1, c2));
+                        textures.push_back(Texture(c1, c2));
                     }
                     else if (curLine[1] == 'n') // normal
                     {
                         str >> tmp; // consume "vn"
                         str >> c1 >> c2 >> c3;
-                        gNormals.push_back(Normal(c1, c2, c3));
+                        normals.push_back(Normal(c1, c2, c3));
                     }
                     else // vertex
                     {
                         str >> tmp; // consume "v"
                         str >> c1 >> c2 >> c3;
-                        gVertices.push_back(Vertex(c1, c2, c3));
+                        vertices.push_back(Vertex(c1, c2, c3));
                     }
                 }
                 else if (curLine[0] == 'f') // face
@@ -217,7 +228,7 @@ bool ParseObj(const string& fileName)
 						tIndex[c] -= 1;
 					}
 
-                    gFaces.push_back(Face(vIndex, tIndex, nIndex));
+                    faces.push_back(Face(vIndex, tIndex, nIndex));
                 }
                 else
                 {
@@ -381,48 +392,50 @@ void initShaders()
 	}
 }
 
-void initVBO()
+void initVBO(GLuint& vao, GLuint& vertexAttribBuffer, GLuint& indexBuffer, 
+            vector<Face>& faces, vector<Normal>& normals, vector<Vertex>& vertices, 
+            int& verticesByteSize, int& normalsByteSize)
 {
-    glGenVertexArrays(1, &teapotVAO);
-    assert(teapotVAO > 0);
-    glBindVertexArray(teapotVAO);
-    cout << "Teapot vao = " << teapotVAO << endl;
+    glGenVertexArrays(1, &vao);
+    assert(vao > 0);
+    glBindVertexArray(vao);
+    cout << "vao = " << vao << endl;
 
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
 	assert(glGetError() == GL_NONE);
 
-	glGenBuffers(1, &gVertexAttribBuffer);
-	glGenBuffers(1, &gIndexBuffer);
+	glGenBuffers(1, &vertexAttribBuffer);
+	glGenBuffers(1, &indexBuffer);
 
-	assert(gVertexAttribBuffer > 0 && gIndexBuffer > 0);
+	assert(vertexAttribBuffer > 0 && indexBuffer > 0);
 
-	glBindBuffer(GL_ARRAY_BUFFER, gVertexAttribBuffer);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gIndexBuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, vertexAttribBuffer);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
 
-	gVertexDataSizeInBytes = gVertices.size() * 3 * sizeof(GLfloat);
-	gNormalDataSizeInBytes = gNormals.size() * 3 * sizeof(GLfloat);
-	int indexDataSizeInBytes = gFaces.size() * 3 * sizeof(GLuint);
-	GLfloat* vertexData = new GLfloat [gVertices.size() * 3];
-	GLfloat* normalData = new GLfloat [gNormals.size() * 3];
-	GLuint* indexData = new GLuint [gFaces.size() * 3];
+    verticesByteSize = vertices.size() * 3 * sizeof(GLfloat);
+    normalsByteSize = normals.size() * 3 * sizeof(GLfloat);
+	int indexDataSizeInBytes = faces.size() * 3 * sizeof(GLuint);
+	GLfloat* vertexData = new GLfloat [vertices.size() * 3];
+	GLfloat* normalData = new GLfloat [normals.size() * 3];
+	GLuint* indexData = new GLuint [faces.size() * 3];
 
     float minX = 1e6, maxX = -1e6;
     float minY = 1e6, maxY = -1e6;
     float minZ = 1e6, maxZ = -1e6;
 
-	for (int i = 0; i < gVertices.size(); ++i)
+	for (int i = 0; i < vertices.size(); ++i)
 	{
-		vertexData[3*i] = gVertices[i].x;
-		vertexData[3*i+1] = gVertices[i].y;
-		vertexData[3*i+2] = gVertices[i].z;
+		vertexData[3*i] = vertices[i].x;
+		vertexData[3*i+1] = vertices[i].y;
+		vertexData[3*i+2] = vertices[i].z;
 
-        minX = std::min(minX, gVertices[i].x);
-        maxX = std::max(maxX, gVertices[i].x);
-        minY = std::min(minY, gVertices[i].y);
-        maxY = std::max(maxY, gVertices[i].y);
-        minZ = std::min(minZ, gVertices[i].z);
-        maxZ = std::max(maxZ, gVertices[i].z);
+        minX = std::min(minX, vertices[i].x);
+        maxX = std::max(maxX, vertices[i].x);
+        minY = std::min(minY, vertices[i].y);
+        maxY = std::max(maxY, vertices[i].y);
+        minZ = std::min(minZ, vertices[i].z);
+        maxZ = std::max(maxZ, vertices[i].z);
 	}
 
     std::cout << "minX = " << minX << std::endl;
@@ -432,24 +445,24 @@ void initVBO()
     std::cout << "minZ = " << minZ << std::endl;
     std::cout << "maxZ = " << maxZ << std::endl;
 
-	for (int i = 0; i < gNormals.size(); ++i)
+	for (int i = 0; i < normals.size(); ++i)
 	{
-		normalData[3*i] = gNormals[i].x;
-		normalData[3*i+1] = gNormals[i].y;
-		normalData[3*i+2] = gNormals[i].z;
+		normalData[3*i] = normals[i].x;
+		normalData[3*i+1] = normals[i].y;
+		normalData[3*i+2] = normals[i].z;
 	}
 
-	for (int i = 0; i < gFaces.size(); ++i)
+	for (int i = 0; i < faces.size(); ++i)
 	{
-		indexData[3*i] = gFaces[i].vIndex[0];
-		indexData[3*i+1] = gFaces[i].vIndex[1];
-		indexData[3*i+2] = gFaces[i].vIndex[2];
+		indexData[3*i] = faces[i].vIndex[0];
+		indexData[3*i+1] = faces[i].vIndex[1];
+		indexData[3*i+2] = faces[i].vIndex[2];
 	}
 
 
-	glBufferData(GL_ARRAY_BUFFER, gVertexDataSizeInBytes + gNormalDataSizeInBytes, 0, GL_STATIC_DRAW);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, gVertexDataSizeInBytes, vertexData);
-	glBufferSubData(GL_ARRAY_BUFFER, gVertexDataSizeInBytes, gNormalDataSizeInBytes, normalData);
+	glBufferData(GL_ARRAY_BUFFER, verticesByteSize + normalsByteSize, 0, GL_STATIC_DRAW);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, verticesByteSize, vertexData);
+	glBufferSubData(GL_ARRAY_BUFFER, verticesByteSize, normalsByteSize, normalData);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexDataSizeInBytes, indexData, GL_STATIC_DRAW);
 
 	// done copying; can free now
@@ -458,16 +471,22 @@ void initVBO()
 	delete[] indexData;
 
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(gVertexDataSizeInBytes));
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(verticesByteSize));
 }
 
 void init() 
 {
-	ParseObj("teapot.obj");
+	ParseObj("teapot.obj",gTextures, gNormals, gVertices, gFaces);
+    ParseObj("cube.obj", orbitTextures, orbitNormals, orbitVertices, orbitFaces);
 
     glEnable(GL_DEPTH_TEST);
     initShaders();
-    initVBO();
+
+    // init teapot
+    initVBO(teapotVAO, gVertexAttribBuffer, gIndexBuffer, gFaces, gNormals, gVertices, gVertexDataSizeInBytes, gNormalDataSizeInBytes);
+
+    // init orbiting object
+    initVBO(orbitVAO, orbitVertexAttribBuffer, orbitIndexBuffer, orbitFaces, orbitNormals, orbitVertices, orbitVertexDataSizeInBytes, orbitNormalDataSizeInBytes);
 
     // create skybox
     createStaticCubeMap();
@@ -507,14 +526,14 @@ void createStaticCubeMap()
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
 }
-void drawTeapot()
+void drawModel(GLuint vao, GLuint vertexAttribBufferId, GLuint indexBufferId, int vertexDataSizeBytes)
 {
-    glBindVertexArray(teapotVAO);
-	glBindBuffer(GL_ARRAY_BUFFER, gVertexAttribBuffer);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gIndexBuffer);
+    glBindVertexArray(vao);
+	glBindBuffer(GL_ARRAY_BUFFER, vertexAttribBufferId);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferId);
 
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(gVertexDataSizeInBytes));
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(vertexDataSizeBytes));
 
 	glDrawElements(GL_TRIANGLES, gFaces.size() * 3, GL_UNSIGNED_INT, 0);
 }
@@ -560,25 +579,36 @@ void display()
     // draw scene as normal
 
     activeProgramIndex = 1;
+
+    setShaderParams(activeProgramIndex);
+
+    // draw skybox first
+    drawSkybox();
+
+
+	// Draw the others
+
+    // Draw Teapot/center obj
+
     glm::vec3 teapotPosition(0.0f, -5.5f, -10.0f);
-    glm::mat4 teapotTranslation = glm::translate(glm::mat4(1.0), teapotPosition);   
+    glm::mat4 teapotTranslation = glm::translate(glm::mat4(1.0), teapotPosition);
 
     static float rotDeg = 0.0f;
     float rotRad = (float)(rotDeg / 180.f) * M_PI;
-    glm::quat rotQuat(cos(rotRad / 2), 0, 1 * sin(rotRad/2), 0);
+    glm::quat rotQuat(cos(rotRad / 2), 0, 1 * sin(rotRad / 2), 0);
     modelingMatrix = teapotTranslation * glm::toMat4(rotQuat) * glm::mat4(1.0);
-
-    setShaderParams(activeProgramIndex);
-
-    // draw skybox as last
-    //modelingMatrix = glm::mat4(1.0);
-    drawSkybox();
-	// Draw the scene
 
     activeProgramIndex = 0;
     setShaderParams(activeProgramIndex);
+    drawModel(teapotVAO, gVertexAttribBuffer, gIndexBuffer, gVertexDataSizeInBytes);
 
-    drawTeapot();
+    // draw orbiting objects
+    glm::vec3 orbitObjectPosition = teapotPosition;
+    orbitObjectPosition.x -= 5.0f;
+    glm::mat4 orbitObjectTranslation = glm::translate(glm::mat4(1.0), orbitObjectPosition);
+    modelingMatrix = orbitObjectTranslation * glm::mat4(1.0);
+    glUniformMatrix4fv(modelingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
+    drawModel(orbitVAO, orbitVertexAttribBuffer, orbitIndexBuffer, orbitVertexDataSizeInBytes);
 
     rotDeg += 25.0f * deltaTime;
 }
