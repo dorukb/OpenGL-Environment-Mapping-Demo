@@ -33,6 +33,12 @@
     <None Include="vert2.glsl">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="teapotFragment.glsl">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="teapotVertex.glsl">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Image Include="..\..\..\Downloads\hw2_support_files\hw2_support_files\skybox_texture_sea\back.jpg">

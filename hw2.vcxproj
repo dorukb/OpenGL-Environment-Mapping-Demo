@@ -163,6 +163,8 @@
     </None>
     <None Include="frag.glsl" />
     <None Include="frag2.glsl" />
+    <None Include="teapotFragment.glsl" />
+    <None Include="teapotVertex.glsl" />
     <None Include="vert.glsl" />
     <None Include="vert2.glsl" />
   </ItemGroup>

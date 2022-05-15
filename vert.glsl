@@ -54,7 +54,6 @@ void main(void)
 	// to the fragment shader after it is interpolated at every fragment.
 	// Front color specifies the color of a vertex for a front facing
 	// primitive.
-
 	color = vec4(diffuseColor + specularColor + ambientColor, 1);
 
 	// Transform the vertex with the product of the projection, viewing, and

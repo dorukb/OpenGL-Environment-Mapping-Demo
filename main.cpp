@@ -22,34 +22,43 @@
 
 #define BUFFER_OFFSET(i) ((char*)NULL + (i))
 
+using namespace std;
+
 void createStaticCubeMap();
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void setShaderParams(int index);
 void drawSkybox();
+void drawOrbitingObject();
+void drawTeapot();
 
-using namespace std;
+void setupFramebuffers();
+void dynamicMappingPasses();
+void finalRenderPass();
+void createDynamicCubemapTexture();
 
-GLuint gProgram[2];
-int gWidth, gHeight;
-
-GLint modelingMatrixLoc[2];
-GLint viewingMatrixLoc[2];
-GLint projectionMatrixLoc[2];
-GLint eyePosLoc[2];
+GLuint gProgram[3];
+GLint modelingMatrixLoc[3];
+GLint viewingMatrixLoc[3];
+GLint projectionMatrixLoc[3];
+GLint eyePosLoc[3];
+int gWidth = 640;
+int gHeight = 480;
 
 glm::mat4 projectionMatrix;
 glm::mat4 viewingMatrix;
 glm::mat4 modelingMatrix;
-glm::vec3 eyePos(0, 0, 0);
+//glm::vec3 eyePos(0, 0, 0);
 
 int activeProgramIndex = 1;
 
 unsigned int cupemapTextureID;
 vector<string> skyboxTextures = { "right.jpg", "left.jpg", "top.jpg", "bottom.jpg", "front.jpg", "back.jpg" };
 
-glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
+glm::vec3 cameraPos = glm::vec3(0.0f, 2.0f, 7.0f);
 glm::vec3 cameraGaze = glm::vec3(0.0f, 0.0f, -1.0f);
 glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+float defaultFovyRad = (float)(45.0 / 180.0) * M_PI;
 
 float deltaTime = 0.0f;	// Time between current frame and last frame
 float lastFrame = 0.0f; // Time of last frame
@@ -116,8 +125,49 @@ GLuint teapotVAO;
 // for drawing the orbitObject(s)
 GLuint orbitVertexAttribBuffer, orbitIndexBuffer;
 int orbitVertexDataSizeInBytes, orbitNormalDataSizeInBytes;
-GLuint orbitVAO;
+GLuint orbitVAO;   
+//glm::vec3 teapotPosition(0.0f, -8.f, -20.0f);
 
+glm::vec3 teapotPosition(0.0f, -0.2f, -0.15f);
+
+// Dynamic cube mapping resources.
+GLuint framebuffers[6];
+GLuint colorTextures[6];
+//GLuint depthTextures[6];
+GLuint depthRenderbuffers[6];
+GLuint dynamicCubemapTexId;
+GLuint fb;
+
+GLsizei captureWidth = 1024;
+GLsizei captureHeight = captureWidth;
+float captureFovy = (float)(90 / 180.0) * M_PI;
+
+vector<glm::vec3> camGazeVectors = {
+      glm::vec3(1.0f,0.f,0.f),    // right
+      glm::vec3(-1.0f,0.f, 0.0f), // left
+      glm::vec3(0.0f, 1.f, 0.0f), // top
+      glm::vec3(0.0f, -1.f, 0.0f), // bottom
+      glm::vec3(0.0f, 0.f, 1.0f), // back
+      glm::vec3(0.0f, 0.f, -1.0f), // front
+};
+
+//vector<glm::vec3> camUpVectors = {
+//    glm::vec3(0.0f, 1.0f, 0.0f), // right
+//    glm::vec3(0.0f, 1.0f, 0.0f), // left
+//    glm::vec3(0.0f, 0.0f, 1.0f), // top
+//    glm::vec3(0.0f, 0.0f, -1.0f), // bottom
+//    glm::vec3(0.0f, 1.0f, 0.0f), // back
+//    glm::vec3(0.0f, 1.0f, 0.0f), // front
+//};
+
+vector<glm::vec3> camUpVectors = {
+    glm::vec3(0.0f, -1.0f, 0.0f), // right
+    glm::vec3(0.0f, -1.0f, 0.0f), // left
+    glm::vec3(0.0f, 0.0f, 1.0f), // top
+    glm::vec3(0.0f, 0.0f, -1.0f), // bottom
+    glm::vec3(0.0f, -1.0f, 0.0f), // back
+    glm::vec3(0.0f, -1.0f, 0.0f), // front
+};
 
 // for drawing the static cubemapped skybox
 GLuint skyboxVAO;
@@ -346,14 +396,17 @@ void initShaders()
 
     gProgram[0] = glCreateProgram();
 	gProgram[1] = glCreateProgram();
+    gProgram[2] = glCreateProgram();
 
 	// Create the shaders for both programs
 
     GLuint vs1 = createVS("vert.glsl");
     GLuint fs1 = createFS("frag.glsl");
-
 	GLuint vs2 = createVS("vert2.glsl");
 	GLuint fs2 = createFS("frag2.glsl");
+
+    GLuint teapotvs = createVS("teapotVertex.glsl");
+    GLuint teapotfs = createFS("teapotFragment.glsl");
 
 	// Attach the shaders to the programs
 
@@ -362,6 +415,9 @@ void initShaders()
 
 	glAttachShader(gProgram[1], vs2);
 	glAttachShader(gProgram[1], fs2);
+
+    glAttachShader(gProgram[2], teapotvs);
+    glAttachShader(gProgram[2], teapotfs);
 
 	// Link the programs
 
@@ -384,9 +440,17 @@ void initShaders()
 		exit(-1);
 	}
 
+
+    glLinkProgram(gProgram[2]);
+    glGetProgramiv(gProgram[2], GL_LINK_STATUS, &status);
+    if (status != GL_TRUE)
+    {
+        cout << "Teapot Program link failed" << endl;
+        exit(-1);
+    }
 	// Get the locations of the uniform variables from both programs
 
-	for (int i = 0; i < 2; ++i)
+	for (int i = 0; i < 3; ++i)
 	{
 		modelingMatrixLoc[i] = glGetUniformLocation(gProgram[i], "modelingMatrix");
 		viewingMatrixLoc[i] = glGetUniformLocation(gProgram[i], "viewingMatrix");
@@ -480,7 +544,7 @@ void initVBO(GLuint& vao, GLuint& vertexAttribBuffer, GLuint& indexBuffer,
 void init() 
 {
 	ParseObj("teapot.obj",gTextures, gNormals, gVertices, gFaces);
-    ParseObj("armadillo.obj", orbitTextures, orbitNormals, orbitVertices, orbitFaces);
+    ParseObj("cube.obj", orbitTextures, orbitNormals, orbitVertices, orbitFaces);
 
     glEnable(GL_DEPTH_TEST);
     initShaders();
@@ -493,8 +557,43 @@ void init()
 
     // create skybox
     createStaticCubeMap();
+    createDynamicCubemapTexture();
+    setupFramebuffers();
 }
 
+void setupFramebuffers() {
+
+    glEnable(GL_TEXTURE_2D);
+    //glCreateFramebuffers(6, framebuffers);
+    //glGenTextures(6, colorTextures);
+    //glGenTextures(6, depthTextures);
+    glGenRenderbuffers(6, depthRenderbuffers);
+
+
+    glGenFramebuffers(1, &fb);
+
+    //for (int i = 0; i < 6; i++) {
+
+    //    //glBindFramebuffer(GL_FRAMEBUFFER, framebuffers[i]);
+    //    //glBindTexture(GL_TEXTURE_2D, colorTextures[i]);
+    //    //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, captureWidth, captureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+    //    //glBindTexture(GL_TEXTURE_2D, depthTextures[i]);
+    //    //glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, captureWidth, captureHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
+    //    //glNamedFramebufferTexture(framebuffers[i], GL_COLOR_ATTACHMENT0, colorTextures[i], 0);
+    //    //glNamedFramebufferTexture(framebuffers[i], GL_DEPTH_ATTACHMENT, depthTextures[i], 0);
+
+    //    glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffers[i]);
+    //    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, captureWidth, captureHeight);
+    //    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffers[i]);
+
+    //    if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+    //        cout << "succesfully setup framebuffer: "<< i << endl;
+    //    }
+    //}
+
+    // Bind the default framebuffer for usual rendering.
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
 void createStaticCubeMap() 
 {
     GLuint skyboxVBO;
@@ -509,6 +608,7 @@ void createStaticCubeMap()
     // Create & setup the static cubemap texture.
     glGenTextures(1, &cupemapTextureID);
     glBindTexture(GL_TEXTURE_CUBE_MAP, cupemapTextureID);
+    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
     int width, height, nrChannels;
     unsigned char* data;
@@ -529,104 +629,183 @@ void createStaticCubeMap()
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
 }
-void drawModel(GLuint vao, GLuint vertexAttribBufferId, GLuint indexBufferId, int vertexDataSizeBytes, size_t faceCount)
+
+void createDynamicCubemapTexture() 
+{
+    // Create & setup the static cubemap texture.
+    glGenTextures(1, &dynamicCubemapTexId);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, dynamicCubemapTexId);
+    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
+    for (unsigned int i = 0; i < skyboxTextures.size(); i++)
+    {
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, captureWidth, captureHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
+    }
+
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+}
+void drawModel(GLuint vao, size_t faceCount)
 {
     glBindVertexArray(vao);
-	glBindBuffer(GL_ARRAY_BUFFER, vertexAttribBufferId);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferId);
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(vertexDataSizeBytes));
-
 	glDrawElements(GL_TRIANGLES, faceCount * 3, GL_UNSIGNED_INT, 0);
 }
 
 void display()
 {
-    glClearColor(0, 0, 0, 1);
+  /*  glClearColor(0, 0, 0, 1);
     glClearDepth(1.0f);
     glClearStencil(0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);*/
 
     float currentFrame = glfwGetTime();
     deltaTime = currentFrame - lastFrame;
-    lastFrame = currentFrame;
+    //cout << "Fps:" << 1000/(deltaTime * 1000) << endl;
 
-    viewingMatrix = glm::lookAt(cameraPos, cameraPos + cameraGaze, cameraUp);
+    // Render offscreen 6 times for th dynamic cube map
+    // all objects except teapot.
+    // specific camera setup for each render.
+    dynamicMappingPasses();
 
-    //glm::quat q0(0, 1, 0, 0); // along x
-    //glm::quat q1(0, 0, 1, 0); // along y
-    //glm::quat q = glm::mix(q0, q1, (pitchDeg - startPitch) / (endPitch - startPitch));
+    glClearColor(0, 0, 0, 1);
+    glClearDepth(1.0f);
+    glClearStencil(0);
 
-    //float sint = sin(rollRad / 2);
-    //glm::quat rollQuat(cos(rollRad/2), sint * q.x, sint * q.y, sint * q.z);
-    //glm::quat pitchQuat(cos(pitchRad/2), 0, 0, 1 * sin(pitchRad/2));
-    ////modelingMatrix = matT * glm::toMat4(pitchQuat) * glm::toMat4(rollQuat) * modelingMatrix;
-    //modelingMatrix = matT * glm::toMat4(rollQuat) * glm::toMat4(pitchQuat) * modelingMatrix; // roll is based on pitch
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
+    finalRenderPass();
 
-    // draw skybox first
-    activeProgramIndex = 1;
-    setShaderParams(activeProgramIndex);
-    drawSkybox();
-
-
-	// Draw the others
-
-    // Draw Teapot/center obj
-
-    glm::vec3 teapotPosition(0.0f, -8.f, -20.0f);
-    glm::mat4 teapotTranslation = glm::translate(glm::mat4(1.0), teapotPosition);
-
-    float rotRad = (float)(centralObjectRotDeg / 180.f) * M_PI;
-    float orbitRotRad = (float)(orbitObjectRotDef / 180.f) * M_PI;
-
-    glm::quat rotQuat(cos(rotRad / 2), 0, 1 * sin(rotRad / 2), 0);
-    modelingMatrix = teapotTranslation * glm::toMat4(rotQuat) * glm::mat4(1.0);
-
-    activeProgramIndex = 0;
-    setShaderParams(activeProgramIndex);
-    drawModel(teapotVAO, gVertexAttribBuffer, gIndexBuffer, gVertexDataSizeInBytes, gFaces.size());
-
-    // draw orbiting objects
-    glm::vec3 orbitObjectPosition = teapotPosition;
-    //orbitObjectPosition.x -= 5.0f;
-    orbitObjectPosition.y -= 7.5f;
-    glm::mat4 orbitObjectTranslation = glm::translate(glm::mat4(1.0), orbitObjectPosition);
-
-    auto t1 = glm::translate(glm::mat4(1.0), teapotPosition);
-    auto rot1 = glm::rotate(t1, orbitRotRad, glm::vec3(1,0,0));
-    auto t2 = glm::translate(rot1, -teapotPosition);
-
-    //float sinrot = sin(rotRad / 2);
-    //glm::quat orbitRot(cos(rotRad / 2), teapotPosition.x * sinrot, teapotPosition.y * sinrot, teapotPosition.z * sinrot);
-    /*glm::vec3 rotAxis = glm::normalize(teapotPosition);
-    glm::quat orbitRot(cos(rotRad / 2), rotAxis * sinrot);    */
-    
-    modelingMatrix = t2 * orbitObjectTranslation;
-
-    //modelingMatrix = orbitObjectTranslation * glm::toMat4(orbitRot) * glm::mat4(1.0);
-    glUniformMatrix4fv(modelingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
-
-    drawModel(orbitVAO, orbitVertexAttribBuffer, orbitIndexBuffer, orbitVertexDataSizeInBytes, orbitFaces.size());
-
+    // End of frame, update interpolating variables.
     centralObjectRotDeg += 25.0f * deltaTime;
     orbitObjectRotDef += 50.0f * deltaTime;
+    lastFrame = currentFrame;
+}
+
+// across passes only camGaze and camUp will change. if store them in an array of 6, we can easily do this in a loop.
+void dynamicMappingPasses() 
+{
+    // Want to obtain square image for cubemap. 
+    // then, aspect ratio = 1, fovy = fovx = 90 deg.
+    glViewport(0, 0, captureWidth, captureHeight);
+    projectionMatrix = glm::perspective(captureFovy, 1.0f, 0.1f, 100.0f);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffers[0]);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, captureWidth, captureHeight);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffers[0]);
+
+    glBindTexture(GL_TEXTURE_CUBE_MAP, dynamicCubemapTexId);
+    for (int i = 0; i < 6; i++) {
+        // render each face
+        //glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffers[i]);
+
+        //glBindTexture(GL_TEXTURE_2D, colorTextures[i]);a
+        //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, captureWidth, captureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+        //glBindTexture(GL_TEXTURE_2D, depthTextures[i]);
+        //glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, captureWidth, captureHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, 0);
+        //glNamedFramebufferTexture(framebuffers[i], GL_COLOR_ATTACHMENT0, colorTextures[i], 0);
+        //glNamedFramebufferTexture(framebuffers[i], GL_DEPTH_ATTACHMENT, depthTextures[i], 0);
+
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, dynamicCubemapTexId, 0);
+        // clear
+        glClearColor(0, 0, 0, 1);
+        glClearDepth(1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        //glm::vec3 renderPos(0, 0, 0);
+        viewingMatrix = glm::lookAt(teapotPosition, teapotPosition + camGazeVectors[i], camUpVectors[i]);
+
+        //viewingMatrix = glm::lookAt(renderPos, renderPos + camGazeVectors[i], camUpVectors[i]);
+
+        // draw scene, except mirror object(teapot)
+        drawSkybox();
+        drawOrbitingObject();
+
+        glTextureBarrier();
+    }
+
+    // end of dynamic mapping.
+    // bind default framebuffer, set newly created textures as readable textures to be used in the final render pass.
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void finalRenderPass() 
+{
+    // use actual camera setup determined via user interaction.
+    viewingMatrix = glm::lookAt(cameraPos, cameraPos + cameraGaze, cameraUp);
+    glViewport(0, 0, gWidth, gHeight); // reset viewport and projection to actual values.
+
+    float aspect = (float)gWidth / (float)gHeight;
+    projectionMatrix = glm::perspective(defaultFovyRad, aspect, 0.1f, 100.0f);
+
+    // Draw all objects
+    drawSkybox(); // uses shader/program 1
+    drawTeapot(); // uses program 2
+    drawOrbitingObject(); // uses program 0, default shading.
 }
 void drawSkybox() 
 {
-    glDepthMask(GL_FALSE);
-    //glDepthFunc(GL_LEQUAL);  // change depth function so depth test passes when values are equal to depth buffer's content
+    activeProgramIndex = 1;
+    setShaderParams(activeProgramIndex);
 
-   // skybox cube
+    glDepthMask(GL_FALSE);
     glBindVertexArray(skyboxVAO);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_CUBE_MAP, cupemapTextureID);
     glDrawArrays(GL_TRIANGLES, 0, 36);
     glBindVertexArray(0);
-    //glDepthFunc(GL_LESS); // set depth function back to default
     glDepthMask(GL_TRUE);
+}
+
+void drawOrbitingObject() 
+{
+    float orbitRotRad = (float)(orbitObjectRotDef / 180.f) * M_PI;
+
+    glm::vec3 orbitObjectPosition = teapotPosition;
+    orbitObjectPosition.y -= 4.5f;
+    glm::mat4 orbitObjectTranslation = glm::translate(glm::mat4(1.0), orbitObjectPosition);
+
+
+
+    float scalef = 1.5f;
+    glm::mat4 scale = glm::scale(glm::mat4(1.0), glm::vec3(scalef, scalef, scalef));
+
+    auto t1 = glm::translate(scale, teapotPosition);
+    //auto t1 = glm::translate(glm::mat4(1.0), teapotPosition);
+    auto rot1 = glm::rotate(t1, orbitRotRad, glm::vec3(1, 0, 0));
+    auto t2 = glm::translate(rot1, -teapotPosition);
+
+
+    modelingMatrix = t2 * orbitObjectTranslation;
+
+    activeProgramIndex = 0;
+    setShaderParams(activeProgramIndex);
+    drawModel(orbitVAO, orbitFaces.size());
+}
+
+
+void drawTeapot() 
+{
+    glm::mat4 teapotTranslation = glm::translate(glm::mat4(1.0), teapotPosition);
+    float rotRad = (float)(centralObjectRotDeg / 180.f) * M_PI;
+    glm::quat rotQuat(cos(rotRad / 2), 0, 1 * sin(rotRad / 2), 0);
+
+    float scalef = 0.5f;
+    glm::mat4 scale = glm::scale(glm::mat4(1.0), glm::vec3(scalef, scalef, scalef));
+    modelingMatrix = teapotTranslation * glm::toMat4(rotQuat) * scale * glm::mat4(1.0);
+
+    activeProgramIndex = 2;
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, dynamicCubemapTexId);
+
+    setShaderParams(activeProgramIndex);
+    drawModel(teapotVAO, gFaces.size());
 }
 void setShaderParams(int index) 
 {
@@ -634,7 +813,7 @@ void setShaderParams(int index)
     glUniformMatrix4fv(projectionMatrixLoc[index], 1, GL_FALSE, glm::value_ptr(projectionMatrix));
     glUniformMatrix4fv(viewingMatrixLoc[index], 1, GL_FALSE, glm::value_ptr(viewingMatrix));
     glUniformMatrix4fv(modelingMatrixLoc[index], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
-    glUniform3fv(eyePosLoc[index], 1, glm::value_ptr(eyePos));
+    glUniform3fv(eyePosLoc[index], 1, glm::value_ptr(cameraPos));
 }
 void reshape(GLFWwindow* window, int w, int h)
 {
@@ -648,9 +827,8 @@ void reshape(GLFWwindow* window, int w, int h)
 
 	// Use perspective projection
 
-	float fovyRad = (float) (45.0 / 180.0) * M_PI;
     float aspect = (float)w / (float)h;
-    projectionMatrix = glm::perspective(fovyRad, aspect, 0.1f , 100.0f);
+    projectionMatrix = glm::perspective(defaultFovyRad, aspect, 0.1f , 100.0f);
 
 	// Assume default camera position and orientation (camera is at
 	// (0, 0, 0) with looking at -z direction and its up vector pointing
